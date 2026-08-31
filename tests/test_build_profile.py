@@ -52,6 +52,54 @@ class ProfilePublisherTest(unittest.TestCase):
                 " — 我在尝试让人与 AI 的协作跨越会话和中断。\n",
             )
 
+    def test_reviewed_english_title_and_abstract_are_validated_and_rendered(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace = Path(temporary_directory)
+            self._write_template(workspace)
+            self._write_record(
+                workspace,
+                slug="bilingual-discovery",
+                title="让探索更容易被发现",
+                title_en="Making AI Explorations Discoverable",
+                abstract_en=(
+                    "This exploration tests a reviewable publication path. "
+                    "Human approval remains the disclosure boundary."
+                ),
+                published="2026-08-31",
+                summary="中文叙事保持权威，同时增加简短英文发现入口。",
+                learning="英文摘要属于同一份人工审核后的公开字节。",
+                next_question="怎样避免双语内容发生漂移？",
+            )
+
+            result = self._run_publisher(workspace)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "*Making AI Explorations Discoverable*",
+                (workspace / "README.md").read_text(encoding="utf-8"),
+            )
+
+    def test_english_abstract_must_contain_two_to_four_sentences(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace = Path(temporary_directory)
+            self._write_template(workspace)
+            self._write_record(
+                workspace,
+                slug="short-abstract",
+                title="摘要边界",
+                title_en="Abstract Boundary",
+                abstract_en="Only one sentence is present.",
+                published="2026-08-31",
+                summary="英文摘要必须足以表达公开探索。",
+                learning="句数边界让人工审核对象保持明确。",
+                next_question="怎样保持摘要简洁？",
+            )
+
+            result = self._run_publisher(workspace)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("English abstract", result.stderr)
+
     def test_local_path_is_rejected_without_changing_generated_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace = Path(temporary_directory)
@@ -524,12 +572,21 @@ class ProfilePublisherTest(unittest.TestCase):
         summary: str,
         learning: str,
         next_question: str,
+        title_en: str | None = None,
+        abstract_en: str | None = None,
     ) -> None:
         exploration_directory = workspace / "explorations"
         exploration_directory.mkdir(parents=True, exist_ok=True)
+        english_metadata = ""
+        if title_en is not None or abstract_en is not None:
+            english_metadata = (
+                f"title_en: {title_en or ''}\n"
+                f"abstract_en: {abstract_en or ''}\n"
+            )
         (exploration_directory / f"{slug}.md").write_text(
             "---\n"
             f"title: {title}\n"
+            f"{english_metadata}"
             f"date: {published}\n"
             f"summary: {summary}\n"
             "status: approved\n"
