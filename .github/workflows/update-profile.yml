@@ -1,44 +1,77 @@
-name: Publish profile
+name: Prepare public profile proposal
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "explorations/**"
-      - "!explorations/README.md"
-      - "profile/**"
-      - "scripts/build_profile.py"
-      - "tests/**"
-      - ".github/workflows/update-profile.yml"
-  workflow_dispatch:
+  repository_dispatch:
+    types: [prepare-publication]
 
 permissions: {}
 
 concurrency:
-  group: publish-profile-${{ github.ref }}
+  group: prepare-publication-${{ github.event.client_payload.branch }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
+    outputs:
+      final_head: ${{ steps.final-head.outputs.sha }}
 
     steps:
-      - name: Check out repository
+      - name: Check out trusted publisher code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
 
-      - name: Test Profile Publisher
-        run: python3 -m unittest -v tests/test_build_profile.py
+      - name: Validate dispatch boundary
+        env:
+          PUBLICATION_BRANCH: ${{ github.event.client_payload.branch }}
+          PUBLICATION_MANIFEST: ${{ github.event.client_payload.manifest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PUBLICATION_BRANCH" =~ ^publication/[a-z0-9][a-z0-9-]{0,62}$ ]]
+          [[ "$PUBLICATION_MANIFEST" =~ ^publication-manifests/pub_[0-9A-HJKMNP-TV-Z]{26}\.json$ ]]
 
-      - name: Generate profile
+      - name: Check out proposal branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.client_payload.branch }}
+          path: proposal
+          fetch-depth: 0
+
+      - name: Validate source proposal
         env:
           PROFILE_PRIVATE_TERMS: ${{ secrets.PROFILE_PRIVATE_TERMS }}
-        run: python3 scripts/build_profile.py --root .
+          PUBLICATION_MANIFEST: ${{ github.event.client_payload.manifest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_head="$(git -C proposal rev-parse HEAD)"
+          python3 trusted/scripts/validate_public_proposal.py \
+            --root proposal \
+            --base "$GITHUB_SHA" \
+            --head "$source_head" \
+            --manifest "$PUBLICATION_MANIFEST" \
+            --stage source
 
-      - name: Verify generated scope
+      - name: Test trusted Profile Publisher
+        working-directory: trusted
+        run: python3 -m unittest -v tests/test_build_profile.py tests/test_public_proposal.py
+
+      - name: Generate proposal surfaces
+        env:
+          PROFILE_PRIVATE_TERMS: ${{ secrets.PROFILE_PRIVATE_TERMS }}
+        run: python3 trusted/scripts/build_profile.py --root proposal
+
+      - name: Commit bounded generated surfaces
+        working-directory: proposal
+        env:
+          PUBLICATION_BRANCH: ${{ github.event.client_payload.branch }}
         shell: bash
         run: |
           set -euo pipefail
@@ -47,34 +80,66 @@ jobs:
             git diff --cached --name-only
             git ls-files --others --exclude-standard
           } | sort -u | grep -vE '^(README\.md|explorations/README\.md)$' || true)"
-
           if [[ -n "$unexpected" ]]; then
-            echo "Profile Publisher changed files outside its allowed outputs:" >&2
-            echo "$unexpected" >&2
+            echo "Profile Publisher changed files outside Generated Surfaces." >&2
             exit 1
           fi
 
-      - name: Commit generated profile
-        shell: bash
-        run: |
-          set -euo pipefail
           git add README.md explorations/README.md
-
-          unexpected_staged="$(
-            git diff --cached --name-only |
-              grep -vE '^(README\.md|explorations/README\.md)$' || true
-          )"
-          if [[ -n "$unexpected_staged" ]]; then
-            echo "Refusing to commit files outside generated surfaces." >&2
-            exit 1
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: prepare public profile proposal"
+            git push origin "HEAD:refs/heads/${PUBLICATION_BRANCH}"
           fi
 
-          if git diff --cached --quiet; then
-            echo "Generated profile is already current."
-            exit 0
-          fi
+      - name: Record final head
+        id: final-head
+        working-directory: proposal
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: publish profile"
-          git push
+  validate:
+    name: Validate final public proposal
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+
+    steps:
+      - name: Check out trusted validator code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out final proposal head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.final_head }}
+          path: proposal
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Public Proposal Validation
+        env:
+          PROFILE_PRIVATE_TERMS: ${{ secrets.PROFILE_PRIVATE_TERMS }}
+        run: >-
+          python3 trusted/scripts/validate_public_proposal.py
+          --root proposal
+          --base "${{ github.sha }}"
+          --head "${{ needs.prepare.outputs.final_head }}"
+          --manifest "${{ github.event.client_payload.manifest }}"
+
+      - name: Record final-head validation status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_HEAD: ${{ needs.prepare.outputs.final_head }}
+        run: >-
+          gh api --method POST
+          "repos/${{ github.repository }}/statuses/${FINAL_HEAD}"
+          -f state=success
+          -f context='Public Proposal Validation'
+          -f description='Validated exact public proposal bytes and generated surfaces'
