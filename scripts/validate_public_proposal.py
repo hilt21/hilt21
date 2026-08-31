@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from build_profile import build_profile, parse_record
 
 
-PUBLICATION_ID_PATTERN = re.compile(r"^pub_[0-9A-HJKMNP-TV-Z]{26}$")
+PUBLICATION_ID_PATTERN = re.compile(r"^pub_[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 ARTIFACT_PATH_PATTERN = re.compile(
     r"^explorations/[a-z0-9]+(?:-[a-z0-9]+)*\.md$"
 )
