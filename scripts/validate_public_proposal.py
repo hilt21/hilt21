@@ -124,7 +124,9 @@ def validate_artifact(root: Path, manifest: dict[str, object]) -> None:
     actual_digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     if actual_digest != expected_digest:
         raise ValueError("artifact digest mismatch")
-    parse_record(artifact, private_terms())
+    record = parse_record(artifact, private_terms())
+    if record.title_en is None or record.abstract_en is None:
+        raise ValueError("publication artifact requires reviewed English metadata")
 
 
 def validate_generated_surfaces(root: Path) -> None:

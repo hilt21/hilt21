@@ -63,6 +63,13 @@ class PublicProposalValidationTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("manifest fields", result.stderr)
 
+    def test_publication_artifact_requires_reviewed_english_metadata(self) -> None:
+        with self._proposal(include_english=False) as proposal:
+            result = self._validate(proposal)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("reviewed English metadata", result.stderr)
+
     def test_source_stage_accepts_only_manifest_and_artifact(self) -> None:
         with self._proposal(generate=False) as proposal:
             result = self._validate(proposal, stage="source")
@@ -136,6 +143,7 @@ class ProposalContext:
         generate: bool = True,
         stale_surface: bool = False,
         extra_manifest_field: bool = False,
+        include_english: bool = True,
     ) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
@@ -154,9 +162,16 @@ class ProposalContext:
         self.base = self._git("rev-parse", "HEAD").stdout.strip()
 
         artifact = self.root / "explorations" / "seed-memory-system.md"
+        english_metadata = ""
+        if include_english:
+            english_metadata = (
+                "title_en: Turning Codex Explorations into Durable Memory\n"
+                "abstract_en: This exploration tests a private source of truth for AI-era learning. Human review remains the boundary for knowledge admission and public disclosure.\n"
+            )
         artifact.write_text(
             "---\n"
             "title: 把 Codex 探索沉淀为可恢复的记忆\n"
+            f"{english_metadata}"
             "date: 2026-08-31\n"
             f"summary: {summary}\n"
             "status: approved\n"

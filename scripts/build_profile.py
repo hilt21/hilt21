@@ -43,8 +43,10 @@ PRIVACY_PATTERNS = {
 class ExplorationRecord:
     slug: str
     title: str
+    title_en: str | None
     published: date
     summary: str
+    abstract_en: str | None
     sections: dict[str, str]
 
 
@@ -80,11 +82,25 @@ def parse_record(path: Path, private_terms: tuple[str, ...]) -> ExplorationRecor
             raise ValueError(f"{path.name}: duplicate metadata field")
         metadata[normalized_key] = value.strip()
 
-    required_metadata = {"title", "date", "summary", "status"}
-    if set(metadata) != required_metadata:
-        raise ValueError(f"{path.name}: metadata fields must be title, date, summary, status")
+    base_metadata = {"title", "date", "summary", "status"}
+    english_metadata = base_metadata | {"title_en", "abstract_en"}
+    if set(metadata) not in (base_metadata, english_metadata):
+        raise ValueError(
+            f"{path.name}: metadata fields must be title, date, summary, status, "
+            "with an optional reviewed title_en and abstract_en pair"
+        )
     if metadata["status"] != "approved":
         raise ValueError(f"{path.name}: only approved records may be published")
+    title_en = metadata.get("title_en")
+    abstract_en = metadata.get("abstract_en")
+    if title_en is not None and not 1 <= len(title_en) <= 120:
+        raise ValueError(f"{path.name}: English title must be concise")
+    if abstract_en is not None:
+        sentence_count = len(re.findall(r"[.!?](?=\s|$)", abstract_en))
+        if not 2 <= sentence_count <= 4 or len(abstract_en) > 600:
+            raise ValueError(
+                f"{path.name}: English abstract must contain two to four sentences"
+            )
 
     try:
         published = date.fromisoformat(metadata["date"])
@@ -107,8 +123,10 @@ def parse_record(path: Path, private_terms: tuple[str, ...]) -> ExplorationRecor
     return ExplorationRecord(
         slug=path.stem,
         title=metadata["title"],
+        title_en=title_en,
         published=published,
         summary=metadata["summary"],
+        abstract_en=abstract_en,
         sections=sections,
     )
 
@@ -116,12 +134,15 @@ def parse_record(path: Path, private_terms: tuple[str, ...]) -> ExplorationRecor
 def render_recent(records: list[ExplorationRecord]) -> str:
     blocks = []
     for record in records[:3]:
-        blocks.append(
-            f"### {record.published.isoformat()} · {record.title}\n\n"
+        block = f"### {record.published.isoformat()} · {record.title}\n\n"
+        if record.title_en:
+            block += f"*{record.title_en}*\n\n"
+        block += (
             f"{record.summary}\n\n"
             f"**目前的认识：** {record.sections['认识']}\n\n"
             f"[阅读全文](explorations/{record.slug}.md)"
         )
+        blocks.append(block)
     return "\n\n".join(blocks)
 
 
