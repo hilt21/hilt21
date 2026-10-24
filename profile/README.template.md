@@ -1,3 +1,13 @@
+# Lu Tao | Mechanical Engineering · Railway Braking Systems
+
+Mechanical engineer based in Suzhou, China, with experience in railway braking systems, bogie equipment solutions, and international project delivery. Currently focusing on AI for engineering and electromechanical braking (EM-Brake), while building AI workflows and practical web tools.
+
+**[Explore my professional profile, selected projects & GitHub activity →](https://hilt21.github.io/aboutMe/)**
+
+[LinkedIn](https://www.linkedin.com/in/taolu42) · [GitHub](https://github.com/hilt21)
+
+---
+
 # 当执行越来越便宜，人应该把时间花在哪里？
 
 > Exploring judgment, memory, and human–AI collaboration with Codex.

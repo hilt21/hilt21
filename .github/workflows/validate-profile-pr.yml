@@ -1,0 +1,72 @@
+name: Validate profile pull request
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: profile-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Public Proposal Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted validation code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Check out exact proposal head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: proposal
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test Profile Publisher and publication boundaries
+        working-directory: proposal
+        run: python3 -m unittest -v tests/test_build_profile.py tests/test_public_proposal.py
+
+      - name: Validate generated surfaces and publication scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path("trusted/scripts").resolve()))
+          from validate_public_proposal import validate, validate_generated_surfaces
+
+          root = Path("proposal").resolve()
+          changed = subprocess.check_output(
+              ["git", "-C", str(root), "diff", "--name-only", "-z",
+               os.environ["BASE_SHA"], os.environ["HEAD_SHA"], "--"],
+          ).decode().split("\0")
+          changed = {path for path in changed if path}
+          manifests = sorted(path for path in changed
+                             if path.startswith("publication-manifests/"))
+          records = {path for path in changed
+                     if path.startswith("explorations/")
+                     and path != "explorations/README.md"}
+          if manifests or records:
+              if len(manifests) != 1:
+                  raise SystemExit("Exploration changes require exactly one publication manifest.")
+              validate(root, os.environ["BASE_SHA"], os.environ["HEAD_SHA"],
+                       manifests[0], "final")
+          else:
+              validate_generated_surfaces(root)
+          print("Public Proposal Validation passed.")
+          PY
